@@ -2,6 +2,16 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import type { Conditions } from '../types/index.js';
 
+export interface ResortMetadata {
+  name: string;
+  elevation: number | null;
+  pistesKm: number | null;
+  liftsTotal: number | null;
+  snowDepth: number | null;
+  price: string | null;
+  resortId: string;
+}
+
 export interface ScrapedResortData {
   name: string;
   resortId: string;
@@ -246,6 +256,102 @@ function parseBergfexDate(text: string): Date | null {
  * Create a simplified resort ID from resort name
  * This is a basic implementation - in production you'd want proper mapping
  */
+/**
+ * Scrape comprehensive resort metadata from bergfex main page
+ */
+export async function scrapeBergfexResortMetadata(): Promise<ResortMetadata[]> {
+  const url = 'https://www.bergfex.com/schweiz/';
+  console.log(`🗻 Scraping resort metadata from: ${url}`);
+
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; IceKing/1.0)'
+      },
+      timeout: 10000
+    });
+
+    const $ = cheerio.load(response.data);
+    const resorts: ResortMetadata[] = [];
+
+    // Find elements containing resort data patterns
+    const resortPatterns = [
+      /(\w+.*)\s+\(\d+\.\d+\s*m\)/,  // Name (elevation)
+      /Pistes:\s*\d+/,                // Pistes data
+      /Lifts:\s*\d+\/\d+/,           // Lifts data
+      /Snow:\s*\d+/,                 // Snow data
+      /CHF\s+\d+,\d+|€\s+\d+|dynamic|-/  // Price data
+    ];
+
+    $('*').each((i, el) => {
+      const text = $(el).text().trim();
+      if (text.length > 20) {
+        const matches = resortPatterns.filter(pattern => pattern.test(text));
+        if (matches.length >= 2) { // Must match at least 2 patterns
+          try {
+            // Extract resort name (first part before elevation)
+            const nameMatch = text.match(/^([^(\n]+)\s*\(/m);
+            const resortName = nameMatch ? nameMatch[1].trim() : 'Unknown';
+
+            if (resortName === 'Unknown' || resortName.length < 2) return;
+
+            // Extract elevation
+            const elevationMatch = text.match(/(\d+(?:\.\d+)?)\s*m/);
+            const elevation = elevationMatch ? parseFloat(elevationMatch[1]) : null;
+
+            // Extract pistes
+            const pistesMatch = text.match(/Pistes:\s*(\d+(?:\.\d+)?)\s*km/);
+            const pistesKm = pistesMatch ? parseFloat(pistesMatch[1]) : null;
+
+            // Extract lifts (only total, not operating)
+            const liftsMatch = text.match(/Lifts:\s*\d+\/(\d+)/);
+            const liftsTotal = liftsMatch ? parseInt(liftsMatch[1]) : null;
+
+            // Extract snow depth
+            const snowMatch = text.match(/Snow:\s*(\d+)\s*cm/);
+            const snowDepth = snowMatch ? parseInt(snowMatch[1]) : null;
+
+            // Extract price
+            const priceMatch = text.match(/Price:\s*([^,\n]+)/);
+            const price = priceMatch ? priceMatch[1].trim() : null;
+
+            // Skip if we don't have meaningful data
+            if (!elevation && !pistesKm && !liftsTotal && !snowDepth) {
+              return;
+            }
+
+            const resort: ResortMetadata = {
+              name: resortName,
+              elevation,
+              pistesKm,
+              liftsTotal,
+              snowDepth,
+              price,
+              resortId: createResortId(resortName)
+            };
+
+            // Avoid duplicates
+            if (!resorts.find(r => r.resortId === resort.resortId)) {
+              resorts.push(resort);
+              console.log(`✅ ${resortName}: ${elevation}m, ${pistesKm}km pistes, ${liftsTotal} lifts, ${snowDepth}cm snow`);
+            }
+
+          } catch (error) {
+            // Skip malformed entries
+          }
+        }
+      }
+    });
+
+    console.log(`🎯 Successfully extracted metadata for ${resorts.length} resorts`);
+    return resorts;
+
+  } catch (error) {
+    console.error(`❌ Error scraping bergfex metadata:`, error);
+    return [];
+  }
+}
+
 function createResortId(resortName: string): string {
   return resortName
     .toLowerCase()

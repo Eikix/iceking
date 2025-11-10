@@ -86,22 +86,46 @@ export async function getRecommendations(options: RecommendationOptions = {}): P
     };
   });
 
-  // Calculate drive times (uses caching internally, processes sequentially to avoid rate limits)
+  // Filter by drive time using cached/pre-calculated estimates
   console.log(`🚗 Calculating drive times for ${resorts.length} resorts...`);
+
+  // Use cached drive times when available, otherwise calculate
   const driveEstimates: any[] = [];
+  for (const resort of resorts) {
+    // First check if we have a cached drive time
+    const cachedDriveTime = DataStorageService.getDriveTime(resort.internalId);
 
-  for (let i = 0; i < resorts.length; i++) {
-    const resort = resorts[i];
-    const estimate = await getDriveEstimate(resort);
-    driveEstimates.push(estimate);
+    if (cachedDriveTime) {
+      const ageMs = Date.now() - cachedDriveTime.cachedAt.getTime();
+      const ageHours = ageMs / (60 * 60 * 1000);
+      console.log(`   ${resort.resort.name}: cached time found (${ageHours.toFixed(1)}h old)`);
 
-    const status = estimate.driveTimeMinutes <= maxDriveTime ? '✅' : '❌';
-    const cacheStatus = '📋'; // Will be overridden by getDriveEstimate logging
-    console.log(`   ${resort.resort.name}: ${estimate.driveTimeMinutes}min ${status}`);
+      if (ageMs < 24 * 60 * 60 * 1000) { // 24 hours
+      // Use cached time if less than 24 hours old
+      const estimate = {
+        resortId: resort.internalId,
+        distanceKm: cachedDriveTime.distanceKm,
+        driveTimeMinutes: cachedDriveTime.driveTimeMinutes,
+        route: 'A4 → A9 → Valais' // Generic route
+      };
+      driveEstimates.push(estimate);
+      console.log(`   ${resort.resort.name}: ${estimate.driveTimeMinutes}min (cached) ✅`);
+    } else {
+      // Calculate new time (this will use Google Maps API when available)
+      const estimate = await getDriveEstimate(resort);
 
-    // Small delay between calls to be respectful to the API
-    if (i < resorts.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
+      // Cache the result
+      const driveTimeData: DriveTime = {
+        resortId: resort.internalId,
+        origin: 'Hedingen',
+        driveTimeMinutes: estimate.driveTimeMinutes,
+        distanceKm: estimate.distanceKm,
+        cachedAt: new Date()
+      };
+      DataStorageService.storeDriveTime(driveTimeData);
+
+      driveEstimates.push(estimate);
+      console.log(`   ${resort.resort.name}: ${estimate.driveTimeMinutes}min (${estimate.driveTimeMinutes <= maxDriveTime ? '✅' : '❌'})`);
     }
   }
 
@@ -170,7 +194,7 @@ export async function getRecommendations(options: RecommendationOptions = {}): P
  * Get detailed information about a specific resort
  */
 export async function getResortDetails(resortId: string): Promise<ResortRecommendation | null> {
-  const resort = getAllResorts().find(r => r.internalId === resortId);
+  const resort = getPriorityResorts().find(r => r.internalId === resortId);
   if (!resort) return null;
 
   const conditions = DataStorageService.getLatestConditions(resortId);
@@ -201,7 +225,7 @@ export async function getResortDetails(resortId: string): Promise<ResortRecommen
  * Get resorts that are currently closed
  */
 export function getClosedResorts(): ResortRecommendation[] {
-  const allResorts = getAllResorts();
+  const allResorts = getPriorityResorts();
   const closedResorts = allResorts.filter(r => r.resort.seasonStatus === 'CLOSED');
 
   return closedResorts.map(resort => {

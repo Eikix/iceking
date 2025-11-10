@@ -1,6 +1,6 @@
-import { statements, mockDb } from '../database/index.js';
+import { driveTimeStatements, conditionStatements, mockDb } from '../database/index.js';
 import type { Conditions, DriveTime } from '../types/index.js';
-import type { ScrapedResortData } from '../scrapers/bergfex.js';
+import type { ScrapedResortData, ResortMetadata } from '../scrapers/bergfex.js';
 import { findResortByBergfexName } from './resortMapping.js';
 import { estimateToDriveTime, getDriveEstimate } from './driveTimes.js';
 
@@ -119,12 +119,13 @@ export class DataStorageService {
    */
   static storeDriveTime(driveTime: DriveTime): void {
     try {
-      statements.insertOrUpdateDriveTime.run({
-        resort_id: driveTime.resortId,
-        origin: driveTime.origin,
-        drive_time_minutes: driveTime.driveTimeMinutes,
-        distance_km: driveTime.distanceKm
-      });
+      driveTimeStatements.insertOrUpdate.run(
+        driveTime.resortId,
+        driveTime.origin,
+        driveTime.driveTimeMinutes,
+        driveTime.distanceKm,
+        driveTime.cachedAt.toISOString()
+      );
     } catch (error) {
       console.error(`Error storing drive time for ${driveTime.resortId}:`, error);
     }
@@ -133,17 +134,26 @@ export class DataStorageService {
   /**
    * Get drive time for a resort
    */
-  static getDriveTime(resortId: string, origin: string = "Dietikon"): DriveTime | null {
+  static getDriveTime(resortId: string, origin: string = "Hedingen"): DriveTime | null {
     try {
-      const row = statements.getDriveTime.get(resortId, origin);
+      const row = driveTimeStatements.getByResortAndOrigin.get(resortId, origin) as any;
       if (!row) return null;
 
+      const cachedAt = new Date(row.cached_at);
+      const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000); // 1 year ago
+
+      // Only return if cached within the last year
+      if (cachedAt < oneYearAgo) {
+        console.log(`   📅 Cache expired for ${resortId} (${cachedAt.toISOString()})`);
+        return null;
+      }
+
       return {
-        resortId,
-        origin,
+        resortId: row.resort_id,
+        origin: row.origin,
         driveTimeMinutes: row.drive_time_minutes,
         distanceKm: row.distance_km,
-        cachedAt: new Date(row.cached_at)
+        cachedAt: cachedAt
       };
     } catch (error) {
       console.error(`Error getting drive time for ${resortId}:`, error);
@@ -152,30 +162,123 @@ export class DataStorageService {
   }
 
   /**
-   * Initialize drive time estimates for all resorts
+   * Initialize persistent drive times - only populate if database is empty
    */
-  static initializeDriveTimes(): void {
-    console.log('Initializing drive time estimates...');
+  static async initializePersistentDriveTimes(): Promise<void> {
+    console.log('Checking persistent drive times...');
+
+    // Check if we already have drive times in SQLite
+    const existingCount = driveTimeStatements.getAll.all().length;
+    if (existingCount > 0) {
+      console.log(`✅ Found ${existingCount} cached drive times in database`);
+      return;
+    }
+
+    console.log('📊 No drive times found, initializing from Google Maps API...');
 
     const { getAllResorts } = require('./resortMapping.js');
     const resorts = getAllResorts();
 
-    for (const resort of resorts) {
-      const estimate = getDriveEstimate(resort);
-      const driveTime = estimateToDriveTime(estimate);
-      this.storeDriveTime(driveTime);
+    // Process in batches to avoid overwhelming the API
+    const batchSize = 3; // Smaller batches for initial population
+    let processed = 0;
+
+    for (let i = 0; i < resorts.length; i += batchSize) {
+      const batch = resorts.slice(i, i + batchSize);
+      console.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(resorts.length/batchSize)} (${batch.length} resorts)...`);
+
+      // Process batch sequentially with delays
+      for (const resort of batch) {
+        try {
+          const estimate = await getDriveEstimate(resort);
+          processed++;
+          console.log(`   ✅ ${resort.resort.name}: ${estimate.driveTimeMinutes}min (${estimate.distanceKm}km)`);
+
+          // Add delay between API calls
+          await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay
+        } catch (error) {
+          console.log(`   ❌ ${resort.resort.name}: Failed to get drive time`);
+        }
+      }
+
+      // Longer delay between batches
+      if (i + batchSize < resorts.length) {
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between batches
+      }
     }
 
-    console.log(`✅ Initialized drive times for ${resorts.length} resorts`);
+    console.log(`✅ Initialized persistent drive times for ${processed} resorts`);
+  }
+
+  /**
+   * Initialize drive time estimates for all resorts (legacy method)
+   */
+  static async initializeDriveTimes(): Promise<void> {
+    // This method is now just an alias for the persistent version
+    return this.initializePersistentDriveTimes();
   }
 
   /**
    * Clear all stored data (for testing/reset)
    */
   static clearAllData(): void {
+    // Only clear in-memory mock data, keep SQLite data persistent
     mockDb.conditions.length = 0;
-    mockDb.driveTimes.length = 0;
-    console.log('✅ Cleared all stored data from mock database');
+    mockDb.resorts.length = 0;
+    console.log('✅ Cleared in-memory data (SQLite data preserved)');
+  }
+
+  /**
+   * Clear all drive times (for testing/reset of cached data)
+   */
+  static clearDriveTimes(): void {
+    try {
+      const db = require('../database/index.js').default || require('../database/index.js');
+      db.exec('DELETE FROM drive_times');
+      console.log('✅ Cleared all drive times from database');
+    } catch (error) {
+      console.error('❌ Failed to clear drive times:', error);
+    }
+  }
+
+  /**
+   * Store resort metadata from main bergfex page
+   */
+  static storeResortMetadata(metadata: ResortMetadata[]): void {
+    console.log(`Storing metadata for ${metadata.length} resorts...`);
+
+    // For now, we'll enhance our existing resort mappings
+    // In a real implementation, this would be stored in a separate metadata table
+    for (const meta of metadata) {
+      // Find existing mapping and enhance it
+      const existing = mockDb.resorts.find(r => r.id === meta.resortId);
+      if (existing) {
+        // Add metadata to existing resort
+        existing.elevation = meta.elevation;
+        existing.pistesKm = meta.pistesKm;
+        existing.liftsTotal = meta.liftsTotal;
+        existing.price = meta.price;
+        console.log(`✅ Enhanced ${meta.name} with metadata`);
+      }
+    }
+  }
+
+  /**
+   * Get resort metadata
+   */
+  static getResortMetadata(resortId: string): ResortMetadata | null {
+    const resort = mockDb.resorts.find(r => r.id === resortId);
+    if (!resort) return null;
+
+    return {
+      name: resort.name,
+      elevation: resort.elevation || null,
+      pistesKm: resort.pistesKm || null,
+      liftsTotal: resort.liftsTotal || null,
+      snowDepth: resort.snowDepth || null,
+      price: resort.price || null,
+      resortId: resort.id
+    };
   }
 
   /**
@@ -193,8 +296,9 @@ export class DataStorageService {
     return {
       resorts: mockDb.resorts.length,
       conditions: conditionsMap.size, // Count unique resorts with conditions
-      driveTimes: mockDb.driveTimes.length,
+      driveTimes: driveTimeStatements.getAll.all().length,
       scores: 0 // Not implemented yet
     };
   }
 }
+

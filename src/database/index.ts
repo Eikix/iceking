@@ -1,38 +1,72 @@
-// Using in-memory database for now due to Bun compatibility issues
-// TODO: Implement proper database persistence later
-export interface MockDatabase {
-  resorts: any[];
-  conditions: any[];
-  driveTimes: any[];
-  scores: any[];
-}
+// Bun's built-in SQLite database
+import { Database } from "bun:sqlite";
+const db = new Database('iceking.db');
 
-export const mockDb: MockDatabase = {
-  resorts: [],
-  conditions: [],
-  driveTimes: [],
-  scores: []
+// Keep mockDb for backward compatibility with existing code
+export const mockDb = {
+  resorts: [] as any[],
+  conditions: [] as any[],
+  driveTimes: [] as any[],
+  scores: [] as any[]
 };
 
-// Mock database operations
-const db = {
-  exec: (sql: string) => {
-    console.log(`Mock DB exec: ${sql.substring(0, 50)}...`);
-  },
-  prepare: (sql: string) => ({
-    run: (...args: any[]) => {
-      console.log(`Mock DB run: ${sql.substring(0, 30)}... with args:`, args);
-      return { lastInsertRowid: Date.now() };
-    },
-    get: (...args: any[]) => {
-      console.log(`Mock DB get: ${sql.substring(0, 30)}... with args:`, args);
-      return null; // Return null for now
-    },
-    all: (...args: any[]) => {
-      console.log(`Mock DB all: ${sql.substring(0, 30)}... with args:`, args);
-      return []; // Return empty array for now
-    }
-  })
+// Create tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS drive_times (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resort_id TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT 'Hedingen',
+    drive_time_minutes INTEGER NOT NULL,
+    distance_km REAL NOT NULL,
+    cached_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(resort_id, origin)
+  );
+
+  CREATE TABLE IF NOT EXISTS resort_conditions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resort_id TEXT NOT NULL,
+    mountain_depth INTEGER,
+    valley_depth INTEGER,
+    new_snow INTEGER,
+    lifts_open INTEGER,
+    lifts_total INTEGER,
+    last_update DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(resort_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_drive_times_resort_origin ON drive_times(resort_id, origin);
+  CREATE INDEX IF NOT EXISTS idx_conditions_resort ON resort_conditions(resort_id);
+`);
+
+// Prepared statements for drive times
+export const driveTimeStatements = {
+  insertOrUpdate: db.prepare(`
+    INSERT OR REPLACE INTO drive_times (resort_id, origin, drive_time_minutes, distance_km, cached_at)
+    VALUES (?, ?, ?, ?, ?)
+  `),
+  getByResortAndOrigin: db.prepare(`
+    SELECT * FROM drive_times WHERE resort_id = ? AND origin = ?
+  `),
+  getAll: db.prepare(`
+    SELECT * FROM drive_times ORDER BY cached_at DESC
+  `),
+  deleteOld: db.prepare(`
+    DELETE FROM drive_times WHERE cached_at < datetime('now', '-1 year')
+  `)
+};
+
+// Prepared statements for conditions
+export const conditionStatements = {
+  insertOrUpdate: db.prepare(`
+    INSERT OR REPLACE INTO resort_conditions (resort_id, mountain_depth, valley_depth, new_snow, lifts_open, lifts_total, last_update)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `),
+  getByResort: db.prepare(`
+    SELECT * FROM resort_conditions WHERE resort_id = ?
+  `),
+  getAllLatest: db.prepare(`
+    SELECT * FROM resort_conditions ORDER BY last_update DESC
+  `)
 };
 
 // Initialize mock database with some sample data

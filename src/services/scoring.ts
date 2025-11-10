@@ -1,10 +1,21 @@
 import type { Resort } from '../types/index.js';
+import { DataStorageService } from './dataStorage.js';
 
 export interface ScoreResult {
   score: number;
   status: 'OPEN' | 'CLOSED' | 'CLOSED_TODAY';
   reason: string;
   openingDate?: Date;
+}
+
+export interface ResortMetadata {
+  name: string;
+  elevation: number | null;
+  pistesKm: number | null;
+  liftsTotal: number | null;
+  snowDepth: number | null;
+  price: string | null;
+  resortId: string;
 }
 
 export function calculateScore(resort: Resort): ScoreResult {
@@ -28,13 +39,21 @@ export function calculateScore(resort: Resort): ScoreResult {
   }
 
   // Calculate score only for open resorts
-  // Adjusted weights for early season conditions
-  const snowScore = normalizeSnowDepth(resort.mountainDepth || 0) * 0.5; // 50% weight on snow
-  const newSnowScore = Math.min((resort.newSnow || 0) * 5, 20); // Up to 20 points for new snow
-  const liftScore = ((resort.liftsOpen || 0) / Math.max(resort.liftsTotal || 1, 1)) * 20; // 20% weight on lifts
+  // Get additional metadata for enhanced scoring
+  const metadata = DataStorageService.getResortMetadata(resort.id);
+
+  // Adjusted weights for comprehensive scoring
+  const snowScore = normalizeSnowDepth(resort.mountainDepth || 0) * 0.4; // 40% weight on snow
+  const newSnowScore = Math.min((resort.newSnow || 0) * 5, 15); // Up to 15 points for new snow
+  const liftScore = ((resort.liftsOpen || 0) / Math.max(resort.liftsTotal || metadata?.liftsTotal || 1, 1)) * 20; // 20% weight on lifts
+
+  // Size/quality bonuses based on metadata
+  const sizeBonus = calculateSizeBonus(metadata); // Up to 15 points for resort size
+  const elevationBonus = calculateElevationBonus(metadata); // Up to 10 points for high elevation
+
   const qualityBonus = getQualityBonus(resort);
 
-  const baseScore = snowScore + newSnowScore + liftScore + qualityBonus;
+  const baseScore = snowScore + newSnowScore + liftScore + sizeBonus + elevationBonus + qualityBonus;
 
   // Reduced penalty for early season - be more lenient
   const liftPenalty = (resort.liftsOpen || 0) < 1 ? 10 : 0; // Reduced from 20
@@ -67,6 +86,43 @@ function getQualityBonus(resort: Resort): number {
   if (resort.hasNightRiding) bonus += 3;
   if (resort.difficulty === 'mixed') bonus += 2;
   return bonus;
+}
+
+function calculateSizeBonus(metadata: ResortMetadata | null): number {
+  if (!metadata) return 0;
+
+  let bonus = 0;
+
+  // Bonus based on piste length
+  if (metadata.pistesKm) {
+    if (metadata.pistesKm >= 200) bonus += 8; // Large resorts like Zermatt, Verbier
+    else if (metadata.pistesKm >= 100) bonus += 5; // Medium-large resorts
+    else if (metadata.pistesKm >= 50) bonus += 3; // Medium resorts
+    else if (metadata.pistesKm >= 20) bonus += 1; // Small resorts
+  }
+
+  // Bonus based on total lifts
+  if (metadata.liftsTotal) {
+    if (metadata.liftsTotal >= 50) bonus += 7; // Very large lift systems
+    else if (metadata.liftsTotal >= 30) bonus += 4; // Large lift systems
+    else if (metadata.liftsTotal >= 15) bonus += 2; // Medium lift systems
+    else if (metadata.liftsTotal >= 5) bonus += 1; // Small lift systems
+  }
+
+  return Math.min(bonus, 15); // Cap at 15 points
+}
+
+function calculateElevationBonus(metadata: ResortMetadata | null): number {
+  if (!metadata?.elevation) return 0;
+
+  // Bonus for high elevation (better snow conditions)
+  const elevation = metadata.elevation;
+  if (elevation >= 3000) return 10; // Very high elevation
+  if (elevation >= 2500) return 7; // High elevation
+  if (elevation >= 2000) return 4; // Medium-high elevation
+  if (elevation >= 1500) return 2; // Medium elevation
+
+  return 0;
 }
 
 function isOperatingToday(resort: Resort): boolean {

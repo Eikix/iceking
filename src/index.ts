@@ -1,13 +1,18 @@
 import { Bot } from "gramio";
 import { getRecommendations, getResortDetails, getClosedResorts, formatRecommendations, formatRecommendation } from './services/recommendations.js';
 import { DataStorageService } from './services/dataStorage.js';
-import { scrapeAllBergfexConditions } from './scrapers/bergfex.js';
+import { scrapeAllBergfexConditions, scrapeBergfexResortMetadata } from './scrapers/bergfex.js';
 
 // Initialize the bot with token from environment variable
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN || "");
 
 // Initialize database on startup
-DataStorageService.initializeDriveTimes();
+// Initialize persistent drive times (only when needed)
+DataStorageService.initializePersistentDriveTimes().then(() => {
+  console.log('🎯 Persistent drive time initialization completed');
+}).catch((error) => {
+  console.error('❌ Drive time initialization failed:', error);
+});
 
 // Commands
 bot
@@ -25,7 +30,7 @@ bot
     })
     .command("recs", async (context) => {
         try {
-            const result = getRecommendations({ maxDriveTime: 90, limit: 5 });
+            const result = await getRecommendations({ maxDriveTime: 90, limit: 5 });
             const message = formatRecommendations(result);
             return context.send(message);
         } catch (error) {
@@ -56,23 +61,29 @@ bot
     })
     .command("scrape", async (context) => {
         try {
-            await context.send("🌐 Scraping latest snow conditions...");
+            await context.send("🌐 Scraping latest snow conditions and resort metadata...");
 
-            const scrapedData = await scrapeAllBergfexConditions();
-            DataStorageService.storeBergfexConditions(scrapedData);
+            // Scrape snow conditions from schneewerte page
+            const snowData = await scrapeAllBergfexConditions();
+            DataStorageService.storeBergfexConditions(snowData);
+
+            // Scrape comprehensive metadata from main page
+            const metadata = await scrapeBergfexResortMetadata();
+            DataStorageService.storeResortMetadata(metadata);
 
             const stats = DataStorageService.getStats();
             return context.send(
-                `✅ Snow conditions updated!\n\n` +
+                `✅ Complete data update finished!\n\n` +
                 `📊 Database Stats:\n` +
-                `• Resorts: ${stats.resorts}\n` +
-                `• Conditions: ${stats.conditions}\n` +
-                `• Drive times: ${stats.driveTimes}\n\n` +
-                `Use /recs to see updated recommendations!`
+                `• Resorts tracked: ${stats.resorts}\n` +
+                `• Snow conditions: ${stats.conditions}\n` +
+                `• Drive times cached: ${stats.driveTimes}\n\n` +
+                `Enhanced with ${metadata.length} resort metadata entries!\n\n` +
+                `Use /recs to see improved recommendations!`
             );
         } catch (error) {
             console.error("Error scraping data:", error);
-            return context.send("❌ Failed to update snow conditions. Try again later.");
+            return context.send("❌ Failed to update data. Try again later.");
         }
     })
     .command("stats", async (context) => {
