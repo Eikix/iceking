@@ -1,0 +1,35 @@
+{
+  "name": "iceking",
+  "version": "1.0.0",
+  "description": "IceKing - Personalized Swiss Snowboard Advisor Telegram Bot",
+  "main": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist",
+    "type-check": "tsc --noEmit",
+    "explore": "bun run scripts/explore-bergfex.ts",
+    "test-scraper": "bun run scripts/test-scraper.ts",
+    "test-recs": "bun run scripts/test-recommendations.ts",
+    "debug-score": "bun run scripts/debug-scoring.ts",
+    "test-full": "bun run scripts/test-full-flow.ts"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/bun": "latest",
+    "@types/cheerio": "^1.0.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@types/sql.js": "^1.4.9",
+    "axios": "^1.13.2",
+    "better-sqlite3": "^12.4.1",
+    "cheerio": "^1.1.2",
+    "gramio": "^0.4.11",
+    "sql.js": "^1.13.0"
+  }
+}
