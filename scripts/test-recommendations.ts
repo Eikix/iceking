@@ -8,9 +8,9 @@ async function testRecommendations(): Promise<void> {
 
   try {
     // Test basic recommendations
-    console.log('Testing basic recommendations (max 90min drive, min score 1, top 5)...');
-    const result = getRecommendations({
-      maxDriveTime: 90,
+    console.log('Testing basic recommendations (max 180min drive, min score 1, top 5)...');
+    const result = await getRecommendations({
+      maxDriveTime: 180,
       minScore: 1, // Lower threshold for testing
       limit: 5
     });

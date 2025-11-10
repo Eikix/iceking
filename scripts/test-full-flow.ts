@@ -25,7 +25,7 @@ async function testFullFlow(): Promise<void> {
     // Step 3: Generate recommendations
     console.log('🎯 Step 3: Generating recommendations...');
     const result = await getRecommendations({
-      maxDriveTime: 90,
+      maxDriveTime: 180,
       minScore: 1,
       limit: 5
     });

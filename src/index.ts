@@ -7,6 +7,9 @@ import { scrapeAllBergfexConditions, scrapeBergfexResortMetadata } from './scrap
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN || "");
 
 // Initialize database on startup
+// Clean up expired cached data first
+DataStorageService.cleanupExpiredData();
+
 // Initialize persistent drive times (only when needed)
 DataStorageService.initializePersistentDriveTimes().then(() => {
   console.log('🎯 Persistent drive time initialization completed');
@@ -19,7 +22,7 @@ bot
     .command("start", (context) => {
         return context.send(
             "🏔️ *IceKing - Your Swiss Snowboard Advisor*\n\n" +
-            "Get real-time snowboarding recommendations for weekday rides in the Zurich area.\n\n" +
+            "Get real-time snowboarding recommendations for weekday rides from Hedingen.\n\n" +
             "Available commands:\n" +
             "/recs - Get today's top recommendations\n" +
             "/closed - Show resorts that are closed\n" +
@@ -30,7 +33,7 @@ bot
     })
     .command("recs", async (context) => {
         try {
-            const result = await getRecommendations({ maxDriveTime: 90, limit: 5 });
+            const result = await getRecommendations({ maxDriveTime: 180, limit: 5 });
             const message = formatRecommendations(result);
             return context.send(message);
         } catch (error) {
@@ -40,7 +43,7 @@ bot
     })
     .command("closed", async (context) => {
         try {
-            const closed = getClosedResorts();
+            const closed = await getClosedResorts();
             if (closed.length === 0) {
                 return context.send("✅ All tracked resorts are currently open!");
             }
@@ -62,6 +65,9 @@ bot
     .command("scrape", async (context) => {
         try {
             await context.send("🌐 Scraping latest snow conditions and resort metadata...");
+
+            // Clean up expired data before storing new data
+            DataStorageService.cleanupExpiredData();
 
             // Scrape snow conditions from schneewerte page
             const snowData = await scrapeAllBergfexConditions();
@@ -111,7 +117,7 @@ bot
             "/stats - Show database statistics\n" +
             "/help - Show this help message\n\n" +
             "*Tips:*\n" +
-            "• Recommendations are filtered to ≤90min drive from Dietikon\n" +
+            "• Recommendations are filtered to ≤180min drive from Hedingen\n" +
             "• Scores consider snow depth, lift status, and distance\n" +
             "• Use /scrape regularly to get fresh data!"
         );

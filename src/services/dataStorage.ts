@@ -22,17 +22,27 @@ export class DataStorageService {
       const resortMapping = findResortByBergfexName(item.name);
       const resortId = resortMapping?.internalId || item.resortId;
 
-      // Insert conditions using mock database
+      // Insert conditions using SQLite database
       try {
-        statements.insertConditions.run({
-          resort_id: resortId,
-          mountain_depth: item.mountainDepth,
-          valley_depth: item.valleyDepth,
-          new_snow: item.newSnow,
-          lifts_open: item.liftsOpen,
-          lifts_total: item.liftsTotal,
-          last_update: item.lastUpdate
-        });
+        conditionStatements.insertOrUpdate.run(
+          resortId,
+          item.mountainDepth,
+          item.valleyDepth,
+          item.newSnow,
+          item.liftsOpen,
+          item.liftsTotal,
+          item.lastUpdate?.toISOString() || new Date().toISOString()
+        );
+
+        // Store season status if available
+        if (item.seasonStatus) {
+          // Update the resort metadata with season status
+          const existing = mockDb.resorts.find(r => r.id === resortId);
+          if (existing) {
+            existing.seasonStatus = item.seasonStatus;
+            console.log(`📊 Updated season status for ${item.name}: ${item.seasonStatus}`);
+          }
+        }
 
         stored++;
         if (resortMapping) {
@@ -53,18 +63,18 @@ export class DataStorageService {
    */
   static getLatestConditions(resortId: string): Conditions | null {
     try {
-      const row = statements.getLatestConditions.get(resortId);
+      const row = conditionStatements.getByResort.get(resortId);
       if (!row) return null;
 
       return {
         resortId,
-        scrapedAt: new Date(row.scraped_at),
+        scrapedAt: new Date(row.last_update),
         mountainDepth: row.mountain_depth,
         valleyDepth: row.valley_depth,
         newSnow: row.new_snow,
         liftsOpen: row.lifts_open,
         liftsTotal: row.lifts_total,
-        lastUpdate: row.last_update ? new Date(row.last_update) : new Date()
+        lastUpdate: new Date(row.last_update)
       };
     } catch (error) {
       console.error(`Error getting conditions for ${resortId}:`, error);
@@ -79,33 +89,39 @@ export class DataStorageService {
     const conditions = new Map<string, Conditions>();
 
     try {
-      // Get ALL stored conditions from mock database
-      // In a real database, we'd do: SELECT * FROM conditions ORDER BY scraped_at DESC
-      // For mock DB, iterate through all stored conditions
-      const allStoredConditions = mockDb.conditions;
+      // Get ALL stored conditions from SQLite database
+      const allRows = conditionStatements.getAllLatest.all();
 
       // Group by resort_id and get the latest for each
       const latestByResort = new Map<string, any>();
-      for (const condition of allStoredConditions) {
-        const existing = latestByResort.get(condition.resort_id);
-        if (!existing || new Date(condition.scraped_at) > new Date(existing.scraped_at)) {
-          latestByResort.set(condition.resort_id, condition);
+      for (const row of allRows) {
+        const existing = latestByResort.get(row.resort_id);
+        if (!existing || new Date(row.last_update) > new Date(existing.last_update)) {
+          latestByResort.set(row.resort_id, row);
         }
       }
 
-      // Convert to Conditions format
-      for (const [resortId, condition] of latestByResort) {
-        const formattedCondition: Conditions = {
-          resortId,
-          scrapedAt: new Date(condition.scraped_at),
-          mountainDepth: condition.mountain_depth,
-          valleyDepth: condition.valley_depth,
-          newSnow: condition.new_snow,
-          liftsOpen: condition.lifts_open,
-          liftsTotal: condition.lifts_total,
-          lastUpdate: condition.last_update ? new Date(condition.last_update) : new Date()
-        };
-        conditions.set(resortId, formattedCondition);
+      // Only include conditions that are less than 1 day old
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000); // 1 day ago
+
+      // Convert to Conditions format (only fresh data)
+      for (const [resortId, row] of latestByResort) {
+        const lastUpdate = new Date(row.last_update);
+        if (lastUpdate >= oneDayAgo) {
+          const formattedCondition: Conditions = {
+            resortId,
+            scrapedAt: lastUpdate,
+            mountainDepth: row.mountain_depth,
+            valleyDepth: row.valley_depth,
+            newSnow: row.new_snow,
+            liftsOpen: row.lifts_open,
+            liftsTotal: row.lifts_total,
+            lastUpdate: lastUpdate
+          };
+          conditions.set(resortId, formattedCondition);
+        } else {
+          console.log(`   📅 Condition expired for ${resortId}: ${lastUpdate.toISOString()}`);
+        }
       }
     } catch (error) {
       console.error('Error getting all conditions:', error);
@@ -222,10 +238,19 @@ export class DataStorageService {
    * Clear all stored data (for testing/reset)
    */
   static clearAllData(): void {
-    // Only clear in-memory mock data, keep SQLite data persistent
-    mockDb.conditions.length = 0;
-    mockDb.resorts.length = 0;
-    console.log('✅ Cleared in-memory data (SQLite data preserved)');
+    try {
+      // Clear SQLite tables
+      const { db } = require('../database/index.js');
+      db.exec('DELETE FROM drive_times');
+      db.exec('DELETE FROM resort_conditions');
+
+      // Clear in-memory mock data
+      mockDb.conditions.length = 0;
+      mockDb.resorts.length = 0;
+      console.log('✅ Cleared all data from database');
+    } catch (error) {
+      console.error('❌ Failed to clear database:', error);
+    }
   }
 
   /**
@@ -238,6 +263,23 @@ export class DataStorageService {
       console.log('✅ Cleared all drive times from database');
     } catch (error) {
       console.error('❌ Failed to clear drive times:', error);
+    }
+  }
+
+  /**
+   * Clean up expired cached data
+   */
+  static cleanupExpiredData(): void {
+    try {
+      // Clean up old drive times (> 1 year)
+      driveTimeStatements.deleteOld.run();
+
+      // Clean up old conditions (> 1 day)
+      conditionStatements.deleteOld.run();
+
+      console.log('✅ Cleaned up expired cached data');
+    } catch (error) {
+      console.error('❌ Failed to cleanup expired data:', error);
     }
   }
 

@@ -2,7 +2,7 @@
 
 **IceKing – Personalized Swiss Snowboard Advisor**
 
-*For weekday shredders in Dietikon, Switzerland*
+*For weekday shredders in Hedingen, Switzerland*
 
 ---
 
@@ -17,7 +17,7 @@ IceKing is a Telegram bot that delivers **real-time, hyper-localized snowboardin
 - **Comprehensive Data**: Scrapes operating hours, season dates, and real-time conditions from multiple sources
 
 ### **Core Value Proposition**
-> *"In under 10 seconds, tell me the top 3 places to snowboard after work — with fresh snow, open lifts, under 90 minutes from Dietikon, and beginner-friendly explanations."*
+> *"In under 10 seconds, tell me the top 3 places to snowboard after work — with fresh snow, open lifts, under 180 minutes from Hedingen, and beginner-friendly explanations."*
 
 ---
 
@@ -41,7 +41,7 @@ Empower Swiss snowboarders with accurate, timely information so they can make th
 
 | Persona | Description |
 |-------|-------------|
-| **Primary User** | Weekday snowboarder in Dietikon. Works 9–5. Wants quick sessions (≤90 min drive). Prioritizes snow quality, open lifts, and minimal crowds. Uses Telegram. Age 25-45, intermediate skill level. |
+| **Primary User** | Weekday snowboarder in Hedingen. Works 9–5. Wants quick sessions (≤180 min drive). Prioritizes snow quality, open lifts, and minimal crowds. Uses Telegram. Age 25-45, intermediate skill level. |
 | **Secondary Users** | Commuters in ZH, AG, SZ. Ride 1–3x/week. Value time efficiency. Want data-driven decisions. |
 
 ### **User Problems & Needs**
@@ -64,9 +64,9 @@ Empower Swiss snowboarders with accurate, timely information so they can make th
 | **P1** | **Daily Snow Report Scraping** | Auto-scrape `bergfex.com/schneewerte/` daily at 4:30 PM CET |
 | **P1** | **Operating Hours & Season Dates** | Scrape resort pages for operating hours, season start/end dates |
 | **P1** | **Closed Resort Pre-Filtering** | Separate closed resorts from open ones, show opening dates |
-| **P1** | **Drive Time Calculation** | Google Distance Matrix API from **Dietikon, CH** to each resort |
+| **P1** | **Drive Time Calculation** | Google Distance Matrix API from **Hedingen, CH** to each resort |
 | **P1** | **Enhanced Snowboard Score Engine** | Revised formula with closed status handling and weekday bonuses |
-| **P1** | **Top 5 Recommendations** | Filter: **drive ≤90 min**, sort by score, separate open/closed |
+| **P1** | **Top 5 Recommendations** | Filter: **drive ≤180 min**, sort by score, separate open/closed |
 | **P1** | **Telegram Bot Interface** | `/recs` → formatted message with emoji, drive time, snow, lifts, explanations |
 | **P2** | **wepowder.com Quality Bonus** | Scrape or API pull for powder/freestyle ratings (0–10) |
 | **P2** | **Push Alerts** | Telegram alert if **score ≥75 AND new snow ≥10 cm** |

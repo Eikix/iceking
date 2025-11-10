@@ -7,7 +7,7 @@ IceKing is a Telegram bot that delivers real-time, hyper-localized snowboarding 
 ## Features
 
 - 🏂 **Real-time snow data** scraped from bergfex.com
-- 🚗 **Drive time calculations** from Dietikon using Google Maps API
+- 🚗 **Drive time calculations** from Hedingen using Google Maps API
 - 📊 **Smart scoring algorithm** combining snow quality, lift status, and distance
 - 🤖 **Telegram bot interface** with easy commands
 - 📅 **Season awareness** - knows when resorts are closed
@@ -91,7 +91,7 @@ The project uses SQLite with the following tables:
 Data sources:
 - **bergfex.com/schneewerte/** - Snow depth, new snow, lift status
 - **bergfex.com** (resort pages) - Operating hours, season dates
-- **Google Distance Matrix API** - Drive times from Dietikon
+- **Google Distance Matrix API** - Drive times from Hedingen
 
 ## Contributing
 

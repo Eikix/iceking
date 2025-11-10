@@ -22,7 +22,7 @@ function formatResortName(resortId: string): string {
 }
 
 export interface RecommendationOptions {
-  maxDriveTime?: number; // minutes (default: 90)
+  maxDriveTime?: number; // minutes (default: 180)
   minScore?: number;     // minimum score threshold (default: 10)
   limit?: number;        // max recommendations (default: 5)
   includeClosed?: boolean; // show closed resorts (default: false)
@@ -33,6 +33,7 @@ export interface RecommendationResult {
   summary: {
     totalConsidered: number;
     filteredByDrive: number;
+    filteredBySeason: number;
     filteredByScore: number;
     finalCount: number;
   };
@@ -43,7 +44,7 @@ export interface RecommendationResult {
  */
 export async function getRecommendations(options: RecommendationOptions = {}): Promise<RecommendationResult> {
   const {
-    maxDriveTime = 90,
+    maxDriveTime = 180,
     minScore = 10,
     limit = 5,
     includeClosed = false
@@ -64,11 +65,16 @@ export async function getRecommendations(options: RecommendationOptions = {}): P
     const existingMapping = allResorts.find(r => r.internalId === resortId);
 
     if (existingMapping) {
+      // Use the season status from the resort mapping (updated by scraper)
       return existingMapping;
     }
 
     // Create a mock mapping for unmapped resorts
     const displayName = formatResortName(resortId);
+    const conditions = conditionsMap.get(resortId);
+    // For unmapped resorts, fall back to lift-based status detection
+    const isOpen = conditions && conditions.liftsOpen && conditions.liftsOpen > 0 ? "OPEN" : "CLOSED";
+
     return {
       internalId: resortId,
       bergfexName: displayName,
@@ -77,7 +83,7 @@ export async function getRecommendations(options: RecommendationOptions = {}): P
         name: displayName,
         bergfexId: resortId,
         coordinates: { lat: 46.8, lng: 8.2 }, // Default Swiss coordinates
-        seasonStatus: "OPEN" as const,
+        seasonStatus: isOpen,
         priority: 3,
         difficulty: "mixed" as const,
         hasPark: false,
@@ -90,33 +96,29 @@ export async function getRecommendations(options: RecommendationOptions = {}): P
   console.log(`🚗 Calculating drive times for ${resorts.length} resorts...`);
   const driveEstimates: any[] = [];
 
-  for (let i = 0; i < resorts.length; i++) {
-    const resort = resorts[i];
+  for (const resort of resorts) {
+    if (!resort) continue; // Skip undefined entries
     const estimate = await getDriveEstimate(resort);
-    driveEstimates.push(estimate);
+    driveEstimates.push({ resort, estimate });
 
     const status = estimate.driveTimeMinutes <= maxDriveTime ? '✅' : '❌';
     const cacheStatus = '📋'; // Will be overridden by getDriveEstimate logging
     console.log(`   ${resort.resort.name}: ${estimate.driveTimeMinutes}min ${status}`);
 
     // Small delay between calls to be respectful to the API
-    if (i < resorts.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
-    }
+    await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
   }
 
-  const resortsWithinDriveTime = resorts.filter((resort, index) => {
-    const estimate = driveEstimates[index];
-    return estimate.driveTimeMinutes <= maxDriveTime;
-  });
+  const resortsWithinDriveTime = driveEstimates
+    .filter(({ estimate }) => estimate.driveTimeMinutes <= maxDriveTime)
+    .map(({ resort }) => resort);
   resorts = resortsWithinDriveTime;
   const filteredByDrive = resorts.length;
 
   // Calculate scores and create recommendations
   const scoredRecommendations: ResortRecommendation[] = [];
 
-  for (let i = 0; i < resorts.length; i++) {
-    const resort = resorts[i];
+  for (const { resort, estimate } of driveEstimates) {
     const conditions = conditionsMap.get(resort.internalId);
 
     // Merge conditions into resort data
@@ -133,21 +135,24 @@ export async function getRecommendations(options: RecommendationOptions = {}): P
     // Calculate score
     const score = calculateScore(resortWithConditions);
 
-    // Get drive time (from pre-calculated estimates)
-    const driveEstimate = driveEstimates[resorts.indexOf(resort)];
-
     const recommendation: ResortRecommendation = {
       resort: resortWithConditions,
       score: score,
-      driveTime: driveEstimate.driveTimeMinutes,
-      distance: driveEstimate.distanceKm
+      driveTime: estimate.driveTimeMinutes,
+      distance: estimate.distanceKm
     };
 
     scoredRecommendations.push(recommendation);
   }
 
+  // Filter out closed resorts unless explicitly requested
+  let filteredRecommendations = scoredRecommendations;
+  if (!includeClosed) {
+    filteredRecommendations = scoredRecommendations.filter(rec => rec.resort.seasonStatus === "OPEN");
+  }
+
   // Filter by minimum score
-  const filteredByScore = scoredRecommendations.filter(rec => rec.score.score >= minScore);
+  const filteredByScore = filteredRecommendations.filter(rec => rec.score.score >= minScore);
 
   // Sort by score (highest first)
   const sorted = filteredByScore.sort((a, b) => b.score.score - a.score.score);
@@ -160,6 +165,7 @@ export async function getRecommendations(options: RecommendationOptions = {}): P
     summary: {
       totalConsidered,
       filteredByDrive,
+      filteredBySeason: filteredRecommendations.length,
       filteredByScore: filteredByScore.length,
       finalCount: final.length
     }
@@ -200,13 +206,13 @@ export async function getResortDetails(resortId: string): Promise<ResortRecommen
 /**
  * Get resorts that are currently closed
  */
-export function getClosedResorts(): ResortRecommendation[] {
+export async function getClosedResorts(): Promise<ResortRecommendation[]> {
   const allResorts = getAllResorts();
   const closedResorts = allResorts.filter(r => r.resort.seasonStatus === 'CLOSED');
 
-  return closedResorts.map(resort => {
+  const result = await Promise.all(closedResorts.map(async (resort) => {
     const conditions = DataStorageService.getLatestConditions(resort.internalId);
-    const driveEstimate = getDriveEstimate(resort);
+    const driveEstimate = await getDriveEstimate(resort);
 
     const resortWithConditions: any = {
       ...resort.resort,
@@ -226,7 +232,9 @@ export function getClosedResorts(): ResortRecommendation[] {
       driveTime: driveEstimate.driveTimeMinutes,
       distance: driveEstimate.distanceKm
     };
-  });
+  }));
+
+  return result;
 }
 
 /**

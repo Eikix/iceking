@@ -66,6 +66,9 @@ export const conditionStatements = {
   `),
   getAllLatest: db.prepare(`
     SELECT * FROM resort_conditions ORDER BY last_update DESC
+  `),
+  deleteOld: db.prepare(`
+    DELETE FROM resort_conditions WHERE last_update < datetime('now', '-1 day')
   `)
 };
 
@@ -109,11 +112,11 @@ mockDb.resorts = [
   }
 ];
 
-// Mock drive times
+// Mock drive times (from Hedingen)
 mockDb.driveTimes = [
-  { resort_id: "engelberg-titlis", origin: "Dietikon", drive_time_minutes: 72, distance_km: 68 },
-  { resort_id: "saas-fee", origin: "Dietikon", drive_time_minutes: 125, distance_km: 145 },
-  { resort_id: "zermatt", origin: "Dietikon", drive_time_minutes: 140, distance_km: 165 }
+  { resort_id: "engelberg-titlis", origin: "Hedingen", drive_time_minutes: 72, distance_km: 68 },
+  { resort_id: "saas-fee", origin: "Hedingen", drive_time_minutes: 125, distance_km: 145 },
+  { resort_id: "zermatt", origin: "Hedingen", drive_time_minutes: 140, distance_km: 165 }
 ];
 
 // Mock conditions (from our earlier scrape)

@@ -21,6 +21,7 @@ export interface ScrapedResortData {
   liftsOpen: number | null;
   liftsTotal: number | null;
   lastUpdate: Date | null;
+  seasonStatus: 'OPEN' | 'CLOSED' | null; // Based on bergfex status indicators
   rawData: {
     rowHtml: string;
     parsedAt: Date;
@@ -46,6 +47,8 @@ export async function scrapeAllBergfexConditions(): Promise<ScrapedResortData[]>
     const $ = cheerio.load(response.data);
     const results: ScrapedResortData[] = [];
 
+    // Debug: Check for status indicators (will be improved later)
+
     // Find the main snow conditions table
     const table = $('table.snow, table').first();
     if (!table.length) {
@@ -68,7 +71,9 @@ export async function scrapeAllBergfexConditions(): Promise<ScrapedResortData[]>
         }
 
         // Extract data from each column (based on discovered structure)
-        const resortName = $(cells[0]).text().trim();
+        const $firstCell = $(cells[0]);
+        const resortName = $firstCell.text().trim();
+
         const valleyText = $(cells[1]).text().trim();
         const mountainText = $(cells[2]).text().trim();
         const newSnowText = $(cells[3]).text().trim();
@@ -91,6 +96,16 @@ export async function scrapeAllBergfexConditions(): Promise<ScrapedResortData[]>
         // Parse date
         const lastUpdate = parseBergfexDate(dateText);
 
+        // Determine season status based on lift operations
+        // 0 operating lifts = CLOSED, 2+ operating lifts = OPEN
+        let seasonStatus: 'OPEN' | 'CLOSED' | null = null;
+        if (liftsOpen === 0 || liftsOpen === null) {
+          seasonStatus = 'CLOSED';
+        } else if (liftsOpen >= 2) {
+          seasonStatus = 'OPEN';
+        } // Single lift operating = uncertain status
+
+
         // Create resort ID from name (simplified mapping)
         const resortId = createResortId(resortName);
 
@@ -103,6 +118,7 @@ export async function scrapeAllBergfexConditions(): Promise<ScrapedResortData[]>
           liftsOpen,
           liftsTotal,
           lastUpdate,
+          seasonStatus,
           rawData: {
             rowHtml: $row.html() || '',
             parsedAt: new Date()
@@ -149,6 +165,7 @@ export async function scrapeBergfexConditions(resortId: string): Promise<Conditi
 }
 
 // Helper functions
+
 
 /**
  * Parse snow depth from text (e.g., "83 cm" or "-")
